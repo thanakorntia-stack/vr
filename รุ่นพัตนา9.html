@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>VR Ninja Reflex - RTX NEON EDITION</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
+    <style>
+      #startScreen, #retryScreen {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        background: linear-gradient(135deg, #050505, #111119, #0a0a1a);
+        z-index: 999; display: flex; flex-direction: column;
+        justify-content: center; align-items: center;
+        font-family: 'Segoe UI', Tahoma, sans-serif; color: white;
+      }
+      #retryScreen { display: none; background: rgba(0,0,0,0.9); backdrop-filter: blur(10px); }
+      
+      .game-input {
+        padding: 10px 15px; font-size: 20px; border: 2px solid #00FFFF; 
+        border-radius: 5px; background: rgba(0,0,0,0.8); color: #00FFFF;
+        margin-bottom: 20px; text-align: center; outline: none; box-shadow: 0 0 10px #00FFFF;
+      }
+      .game-btn {
+        padding: 12px 30px; font-size: 22px; font-weight: bold;
+        background-color: #00FFFF; color: #000; border: none;
+        border-radius: 5px; cursor: pointer; transition: 0.2s; box-shadow: 0 0 20px #00FFFF;
+      }
+      .game-btn:hover { transform: scale(1.1); background-color: #fff; box-shadow: 0 0 30px #fff; }
+      .score-display { font-size: 30px; color: #FFD700; margin-bottom: 20px; text-shadow: 0 0 10px #FFD700; }
+    </style>
+  </head>
+  <body>
+    <div id="startScreen">
+      <h1 style="font-size: 45px; text-shadow: 0 0 20px #00FFFF; margin-bottom: 10px; letter-spacing: 2px;">NEON REFLEX VR</h1>
+      <p style="font-size: 18px; color: #aaa; margin-bottom: 20px;">ชี้เพื่อยิงอัญมณี (+10) | ห้ามชี้ระเบิด (-5s)</p>
+      <input type="text" id="playerName" class="game-input" placeholder="Enter your name..." autocomplete="off">
+      <button id="startBtn" class="game-btn">START MISSION</button>
+    </div>
+
+    <div id="retryScreen">
+      <h1 style="font-size: 40px; color: #FF0000; text-shadow: 0 0 15px #FF0000;">MISSION OVER</h1>
+      <div id="finalScore" class="score-display">SCORE: 0</div>
+      <button id="retryBtn" class="game-btn">RETRY MISSION</button>
+    </div>
+
+    <a-scene shadow="type: pcfsoft" fog="type: exponential; color: #020204; density: 0.04">
+      <a-entity environment="preset: starry; lighting: none; groundColor: #0a0a0a; grid: 1x1; gridColor: #1a1a1a"></a-entity>
+      <a-light type="ambient" color="#222"></a-light>
+      <a-light type="directional" position="5 10 5" intensity="0.6" color="#ffffff"></a-light>
+z-axis
+      <a-entity position="0 1.6 0">
+        <a-camera look-controls wasd-controls>
+          <a-cursor fuse="true" fuse-timeout="3" raycaster="objects: .interactable" color="#FFFFFF"></a-cursor>
+          <a-plane id="damageOverlay" position="0 0 -0.5" width="5" height="5" color="#FF0000" material="transparent: true; opacity: 0" visible="false"></a-plane>
+          <a-plane id="healOverlay" position="0 0 -0.5" width="5" height="5" color="#00FFFF" material="transparent: true; opacity: 0" visible="false"></a-plane>
+          
+          <a-text id="nameText" value="" position="-1.5 1.1 -2" color="#00FFFF" width="3" font="monoid"></a-text>
+          <a-text id="scoreText" value="SCORE: 0" position="-1.5 0.8 -2" color="#FFFFFF" width="4" font="monoid"></a-text>
+          <a-text id="comboText" value="" position="-1.5 0.5 -2" color="#FFD700" width="4" font="monoid"></a-text>
+          <a-text id="timerText" value="TIME: 45" position="1.5 0.8 -2" color="#00FF00" width="4" font="monoid" align="right"></a-text>
+          <a-text id="warningText" value="" position="0 0.5 -1.5" color="#FF0000" width="5" font="monoid" align="center"></a-text>
+        </a-camera>
+      </a-entity>
+
+      <a-entity id="mainGem" class="interactable" position="0 1.5 -5" radius="0.3" shadow="cast: true" visible="false"
+        geometry="primitive: octahedron"
+        material="color: #00FFFF; emissive: #008888; emissiveIntensity: 0.5"
+        animation="property: rotation; to: 0 360 0; loop: true; dur: 2000; easing: linear">
+      </a-entity>
+
+      <a-entity id="mainBomb" class="interactable" position="2 1.2 -5" radius="0.4" shadow="cast: true" visible="false"
+        geometry="primitive: icosahedron"
+        material="color: #000; emissive: #FF0000; emissiveIntensity: 0.8; wireframe: true"
+        animation="property: rotation; to: 360 360 360; loop: true; dur: 4000; easing: linear">
+      </a-entity>
+    </a-scene>
+
+    <script>
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      function playSound(type) {
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+        if(type === 'hit') {
+          osc.frequency.setValueAtTime(800, now);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+          osc.start(now); osc.stop(now + 0.1);
+        } else if (type === 'hurt') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(150, now);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+          osc.start(now); osc.stop(now + 0.3);
+        }
+      }
+
+      const startScreen = document.querySelector('#startScreen');
+      const retryScreen = document.querySelector('#retryScreen');
+      const startBtn = document.querySelector('#startBtn');
+      const retryBtn = document.querySelector('#retryBtn');
+      const finalScoreText = document.querySelector('#finalScore');
+      
+      const gemEl = document.querySelector('#mainGem');
+      const bombEl = document.querySelector('#mainBomb');
+      const scoreText = document.querySelector('#scoreText');
+      const timerText = document.querySelector('#timerText');
+      const comboText = document.querySelector('#comboText');
+      const warningText = document.querySelector('#warningText');
+
+      let score = 0;
+      let timeLeft = 45; 
+      let isGameOver = true; 
+      let comboCount = 0;
+      let timerInterval = null;
+
+      function moveAllTargets() {
+        // ปรับระยะการสุ่มให้ถอยห่างออกไป (Z ระหว่าง -3 ถึง -7)
+        // และกว้างขึ้น (X ระหว่าง -5 ถึง 5)
+        const randomPos = () => ({
+          x: (Math.random() * 20) - 5,
+          y: 0.8 + (Math.random() * 2.5),
+          z: (Math.random() * -4) - 15 
+        });
+        
+        const gPos = randomPos();
+        let bPos = randomPos();
+
+        // เช็คไม่ให้ลูกระเบิดเกิดทับที่เดียวกับอัญมณีเป๊ะๆ
+        if(Math.abs(gPos.x - bPos.x) < 1) bPos.x += 2;
+
+        gemEl.setAttribute('position', `${gPos.x} ${gPos.y} ${gPos.z}`);
+        bombEl.setAttribute('position', `${bPos.x} ${bPos.y} ${bPos.z}`);
+      }
+
+      function flashScreen(overlayElement) {
+        overlayElement.setAttribute('visible', 'true');
+        overlayElement.setAttribute('animation', 'property: material.opacity; from: 0.5; to: 0; dur: 300; easing: easeOutQuad;');
+        setTimeout(() => overlayElement.setAttribute('visible', 'false'), 350);
+      }
+
+      function startGame() {
+        score = 0;
+        timeLeft = 45;
+        comboCount = 0;
+        isGameOver = false;
+        
+        scoreText.setAttribute('value', 'SCORE: 0');
+        timerText.setAttribute('value', 'TIME: 45');
+        timerText.setAttribute('color', '#00FF00');
+        comboText.setAttribute('value', '');
+        startScreen.style.display = 'none';
+        retryScreen.style.display = 'none';
+        
+        gemEl.setAttribute('visible', 'true');
+        bombEl.setAttribute('visible', 'true');
+        moveAllTargets();
+
+        if(timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+          if (!isGameOver) {
+            timeLeft--; 
+            timerText.setAttribute('value', 'TIME: ' + timeLeft);
+            if(timeLeft <= 10) timerText.setAttribute('color', '#FF0000');
+            if (timeLeft <= 0) endGame();
+          }
+        }, 1000);
+      }
+
+      function endGame() {
+        isGameOver = true;
+        clearInterval(timerInterval);
+        gemEl.setAttribute('visible', 'false');
+        bombEl.setAttribute('visible', 'false');
+        finalScoreText.innerText = 'FINAL SCORE: ' + score;
+        retryScreen.style.display = 'flex';
+      }
+
+      startBtn.addEventListener('click', () => {
+        let pName = document.querySelector('#playerName').value.trim() || "PLAYER 1";
+        document.querySelector('#nameText').setAttribute('value', 'AGENT: ' + pName.toUpperCase());
+        startGame();
+      });
+
+      retryBtn.addEventListener('click', startGame);
+
+      gemEl.addEventListener('click', () => {
+        if (isGameOver) return;
+        playSound('hit');
+        flashScreen(document.querySelector('#healOverlay'));
+        comboCount++;
+        score += 10 * comboCount;
+        scoreText.setAttribute('value', 'SCORE: ' + score);
+        comboText.setAttribute('value', 'COMBO x' + comboCount);
+        moveAllTargets();
+      });
+
+      bombEl.addEventListener('click', () => {
+        if (isGameOver) return;
+        playSound('hurt');
+        flashScreen(document.querySelector('#damageOverlay'));
+        comboCount = 0;
+        comboText.setAttribute('value', '');
+        timeLeft = Math.max(0, timeLeft - 5);
+        warningText.setAttribute('value', 'TIME PENALTY!');
+        setTimeout(() => warningText.setAttribute('value', ''), 800);
+        moveAllTargets();
+      });
+    </script>
+  </body>
+</html>
